@@ -15,27 +15,26 @@ namespace lazyVec
         }
     };
 
-    template<typename TType, std::size_t TSize, typename TAcc, typename TDevAcc, typename TDevQueue>
+    template<typename TType, std::size_t TSize, typename TAlpakaDevice>
     class Vector
     {
     public:
         using value_type = TType;
         std::size_t const size = TSize;
-        using AccType = TAcc;
-        using BufType = alpaka::Buf<TAcc, TType, alpaka::DimInt<1u>, std::size_t>;
+        using AlpakaDeviceType = TAlpakaDevice;
+        using MappingType = typename AlpakaDeviceType::MappingType;
+        using BufType = alpaka::Buf<MappingType, TType, alpaka::DimInt<1u>, std::size_t>;
 
     private:
-        TDevAcc const& devAcc;
-        TDevQueue& devQueue;
+        AlpakaDeviceType const devAcc;
         using Vec = alpaka::Vec<alpaka::DimInt<1u>, std::size_t>;
         BufType buffer;
         TType* mem_ptr;
 
     public:
-        Vector(TDevAcc const& acc, TDevQueue& queue)
+        Vector(TAlpakaDevice const acc)
             : devAcc(acc)
-            , devQueue(queue)
-            , buffer(alpaka::allocBuf<TType, std::size_t>(devAcc, Vec::all(TSize)))
+            , buffer(alpaka::allocBuf<TType, std::size_t>(devAcc.device, Vec::all(TSize)))
             , mem_ptr(alpaka::getPtrNative(buffer))
         {
         }
@@ -59,14 +58,9 @@ namespace lazyVec
             return mem_ptr[index];
         }
 
-        TDevAcc& getDevAcc() const
+        AlpakaDeviceType const& getDevAcc() const
         {
             return devAcc;
-        }
-
-        TDevQueue& getDevQueue()
-        {
-            return devQueue;
         }
 
         BufType const& get_buffer() const
@@ -75,22 +69,16 @@ namespace lazyVec
         }
 
 
-        template<
-            typename TOType,
-            std::size_t TOSize,
-            typename TOAcc,
-            typename TODevAcc,
-            typename TODevQueue,
-            typename TQueue>
+        template<typename TOType, std::size_t TOSize, typename TOAlpakaDevice, typename TQueue>
         // copies data from other to own buffer
-        void copy(Vector<TOType, TOSize, TOAcc, TODevAcc, TODevQueue> const& other, TQueue& queue)
+        void copy(Vector<TOType, TOSize, TOAlpakaDevice> const& other, TQueue& queue)
         {
             alpaka::Vec<alpaka::DimInt<1u>, std::size_t> const extent(TSize);
             alpaka::memcpy(queue, buffer, other.get_buffer(), extent);
         }
 
         //*** I/O operators ***
-        friend std::ostream& operator<<(std::ostream& co, Vector<TType, TSize, TAcc, TDevAcc, TDevQueue> const& v)
+        friend std::ostream& operator<<(std::ostream& co, Vector<TType, TSize, TAlpakaDevice> const& v)
         {
             co << "{";
             co << v[0];
@@ -101,17 +89,23 @@ namespace lazyVec
         }
     };
 
-    template<typename TType, std::size_t TSize, typename TAcc, typename TDevAcc, typename TDevQueue>
-    Vector<TType, TSize, TAcc, TDevAcc, TDevQueue> operator+(
-        Vector<TType, TSize, TAcc, TDevAcc, TDevQueue> /* const */& a,
-        Vector<TType, TSize, TAcc, TDevAcc, TDevQueue> /* const */& b)
+
+    template<typename TType, std::size_t TSize, typename TAlpakaDevice, typename TQueue>
+    Vector<TType, TSize, TAlpakaDevice>
+    // operator+(
+    sum(Vector<TType, TSize, TAlpakaDevice> /* const */& a,
+        Vector<TType, TSize, TAlpakaDevice> /* const */& b,
+        TQueue& queue)
+
     {
-        Vector<TType, TSize, TAcc, TDevAcc, TDevQueue> c(a.getDevAcc(), a.getDevQueue());
+        Vector<TType, TSize, TAlpakaDevice> c(a.getDevAcc());
+
+        using MappingType = typename TAlpakaDevice::MappingType;
 
         Sum const sum;
-        vikunja::transform::deviceTransform<TAcc>(
+        vikunja::transform::deviceTransform<MappingType>(
             a.getDevAcc(),
-            a.getDevQueue(),
+            queue,
             TSize,
             a.begin(),
             b.begin(),

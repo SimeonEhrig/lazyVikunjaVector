@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.18)
 project(lazyVec)
 
 OPTION(ALPAKA_ACC_CPU_B_SEQ_T_SEQ_ENABLE "Enable the serial CPU accelerator" ON)
+set(ALPAKA_CXX_STANDARD 17)
 
 find_package(vikunja REQUIRED)
 

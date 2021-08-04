@@ -1,7 +1,9 @@
+#include "device.hpp"
 #include "vector.hpp"
 
 #include <alpaka/alpaka.hpp>
 #include <iostream>
+//#include <type_traits>
 
 class InitKernel
 {
@@ -41,10 +43,18 @@ int main()
 #else
     using DevAcc = alpaka::AccCpuSerial<Dim, std::size_t>;
 #endif
-    using DevQueue = alpaka::Queue<DevAcc, alpaka::Blocking>;
 
-    auto const devAcc = alpaka::getDevByIdx<DevAcc>(0u);
-    DevQueue devQueue(devAcc);
+    lazyVec::AlpakaRunner<DevAcc, alpaka::Blocking> devRunner(0u);
+    devRunner.createQueue();
+
+    // only a notice, how to get the device type from the object
+    /*
+      lazyVec::AlpakaDevice<DevAcc> const devAcc(0u);
+      using accType = std::decay_t<decltype(devAcc.device)>;
+      accType const & d = devAcc.device;
+    */
+
+    using MappingType = DevAcc;
 
     alpaka::Vec<Dim, std::size_t> const extent(vector_size);
     alpaka::WorkDivMembers<Dim, std::size_t> const workdiv{
@@ -52,44 +62,45 @@ int main()
         static_cast<std::size_t>(1),
         static_cast<std::size_t>(1)};
 
-    lazyVec::Vector<int, vector_size, DevAcc, decltype(devAcc), DevQueue> a(devAcc, devQueue);
-    lazyVec::Vector<int, vector_size, DevAcc, decltype(devAcc), DevQueue> b(devAcc, devQueue);
+    lazyVec::Vector<int, vector_size, lazyVec::AlpakaDevice<DevAcc>> a(devRunner.device);
+    lazyVec::Vector<int, vector_size, lazyVec::AlpakaDevice<DevAcc>> b(devRunner.device);
 
     // ######################
     // # init data
     // ######################
 
     InitKernel const initKernel;
-    alpaka::exec<DevAcc>(devQueue, workdiv, initKernel, a.begin(), a.size);
-    alpaka::exec<DevAcc>(devQueue, workdiv, initKernel, b.begin(), b.size);
+    alpaka::exec<MappingType>(devRunner.queues.front(), workdiv, initKernel, a.begin(), a.size);
+    alpaka::exec<MappingType>(devRunner.queues.front(), workdiv, initKernel, b.begin(), b.size);
 
     // ######################
     // # run calculation
     // ######################
 
-    auto c = a + b;
+    // should work again, if lazy evaluation is implemented
+    // auto c = a + b;
+    auto c = lazyVec::sum(a, b, devRunner.queues.front());
 
     // ######################
     // # print result
     // ######################
 
     using HostAcc = alpaka::AccCpuSerial<Dim, std::size_t>;
-    using HostQueue = alpaka::Queue<HostAcc, alpaka::Blocking>;
-    auto const hostAcc = alpaka::getDevByIdx<HostAcc>(0u);
-    HostQueue hostQueue(hostAcc);
+    lazyVec::AlpakaRunner<HostAcc, alpaka::Blocking> hostRunner(0u);
+    hostRunner.createQueue();
 
     // use vector to run safe std::cout -> if the Acc of a,b or c is CUDA, std::cout should not work
-    lazyVec::Vector<int, vector_size, HostAcc, decltype(hostAcc), HostQueue> output(hostAcc, hostQueue);
-    output.copy(a, devQueue);
-    alpaka::wait(devQueue);
+    lazyVec::Vector<int, vector_size, lazyVec::AlpakaDevice<HostAcc>> output(hostRunner.device);
+    output.copy(a, devRunner.queues.front());
+    alpaka::wait(devRunner.queues.front());
     std::cout << "a: " << output << std::endl;
 
-    output.copy(b, devQueue);
-    alpaka::wait(devQueue);
+    output.copy(b, devRunner.queues.front());
+    alpaka::wait(devRunner.queues.front());
     std::cout << "b: " << output << std::endl;
 
-    output.copy(c, devQueue);
-    alpaka::wait(devQueue);
+    output.copy(c, devRunner.queues.front());
+    alpaka::wait(devRunner.queues.front());
     std::cout << "c: " << output << std::endl;
 
     return 0;
